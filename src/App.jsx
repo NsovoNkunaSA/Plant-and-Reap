@@ -15,6 +15,22 @@ function formatTime(seconds) {
   return `${minutes}:${remaining}`
 }
 
+function dateKey(date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function readCompletedDates() {
+  try {
+    const savedDates = JSON.parse(window.localStorage.getItem('rooted-focus-dates') || '[]')
+    return Array.isArray(savedDates) ? savedDates.filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)) : []
+  } catch {
+    return []
+  }
+}
+
 function Scene({ habitat, growth }) {
   const count = Math.max(1, Math.ceil(growth * 8))
   const positions = [55, 142, 225, 325, 424, 518, 625, 724]
@@ -88,12 +104,25 @@ function Scene({ habitat, growth }) {
 }
 
 export default function App() {
+  const [today, setToday] = useState(() => new Date())
   const [selectedHabitat, setSelectedHabitat] = useState('trees')
   const [duration, setDuration] = useState(25)
   const [customDuration, setCustomDuration] = useState('')
   const [remaining, setRemaining] = useState(25 * 60)
   const [isRunning, setIsRunning] = useState(false)
-  const [sessions, setSessions] = useState(3)
+  const [completedDates, setCompletedDates] = useState(readCompletedDates)
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1))
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(() => dateKey(new Date()))
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false)
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setToday(new Date()), 60_000)
+    return () => window.clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    window.localStorage.setItem('rooted-focus-dates', JSON.stringify(completedDates))
+  }, [completedDates])
 
   useEffect(() => {
     if (!isRunning) return undefined
@@ -101,7 +130,7 @@ export default function App() {
       if (remaining <= 1) {
         setRemaining(0)
         setIsRunning(false)
-        setSessions((total) => total + 1)
+        setCompletedDates((dates) => [...new Set([...dates, dateKey(new Date())])])
       } else {
         setRemaining(remaining - 1)
       }
@@ -113,6 +142,31 @@ export default function App() {
   const progress = Math.min(1, Math.max(0, (totalSeconds - remaining) / totalSeconds))
   const growth = Math.max(0.13, progress)
   const selected = habitats.find((habitat) => habitat.id === selectedHabitat)
+  const completedDateSet = new Set(completedDates)
+  const todayKey = dateKey(today)
+  const firstDay = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1)
+  const leadingDays = (firstDay.getDay() + 6) % 7
+  const daysInMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate()
+  const trailingDays = 42 - leadingDays - daysInMonth
+  const calendarDays = [
+    ...Array.from({ length: leadingDays }, (_, index) => ({ key: `blank-${index}`, date: null })),
+    ...Array.from({ length: daysInMonth }, (_, index) => {
+      const date = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), index + 1)
+      return { key: dateKey(date), date }
+    }),
+    ...Array.from({ length: trailingDays }, (_, index) => ({ key: `end-blank-${index}`, date: null })),
+  ]
+  let streak = 0
+  const streakDate = new Date(today)
+  if (!completedDateSet.has(dateKey(streakDate))) streakDate.setDate(streakDate.getDate() - 1)
+  while (completedDateSet.has(dateKey(streakDate))) {
+    streak += 1
+    streakDate.setDate(streakDate.getDate() - 1)
+  }
+
+  function changeCalendarMonth(amount) {
+    setCalendarMonth((month) => new Date(month.getFullYear(), month.getMonth() + amount, 1))
+  }
 
   function chooseDuration(minutes) {
     const bounded = Math.min(120, Math.max(1, minutes))
@@ -129,29 +183,42 @@ export default function App() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <a className="brand" href="#home" aria-label="Rooted home">
+        <div className="brand" aria-label="Rooted">
           <span className="brand-mark" aria-hidden="true">r.</span>
           <span>rooted<span className="brand-period">.</span></span>
-        </a>
+        </div>
         <div className="sidebar-label">YOUR SPACE</div>
         <nav className="main-nav" aria-label="Main navigation">
           <a className="nav-item nav-active" href="#focus"><span aria-hidden="true">◷</span> Focus garden</a>
-          <a className="nav-item" href="#collection"><span aria-hidden="true">▧</span> My collection</a>
         </nav>
-        <div className="sidebar-bottom">
-          <div className="streak-icon" aria-hidden="true">✳</div>
-          <p className="streak-label">YOUR GROWING STREAK</p>
-          <p className="streak-number">4 <span>days</span></p>
-          <div className="week-dots" aria-label="Four study days this week">
-            <span className="done">M</span><span className="done">T</span><span className="done">W</span><span className="today">T</span><span>F</span><span>S</span><span>S</span>
+        <button className="calendar-mobile-toggle" type="button" aria-label="Toggle focus calendar" aria-expanded={isCalendarOpen} onClick={() => setIsCalendarOpen((open) => !open)}>▦</button>
+        <div className={`sidebar-bottom ${isCalendarOpen ? 'calendar-open' : ''}`}>
+          <div className="calendar-heading">
+            <div><p className="streak-label">FOCUS CALENDAR</p><p className="streak-number">{streak} <span>day streak</span></p></div>
+            <div className="calendar-month-nav">
+              <button type="button" aria-label="Previous month" onClick={() => changeCalendarMonth(-1)}>‹</button>
+              <strong>{calendarMonth.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</strong>
+              <button type="button" aria-label="Next month" onClick={() => changeCalendarMonth(1)}>›</button>
+            </div>
           </div>
+          <div className="calendar-grid calendar-weekdays" aria-hidden="true">{['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
+          <div key={`${calendarMonth.getFullYear()}-${calendarMonth.getMonth()}`} className="calendar-grid calendar-days" aria-label="Focus sessions calendar">
+            {calendarDays.map(({ date, key }) => {
+              if (!date) return <span key={key} className="calendar-empty" aria-hidden="true" />
+              const isToday = key === todayKey
+              const isSelected = key === selectedCalendarDate
+              const wasCompleted = completedDateSet.has(key)
+              return <button key={key} type="button" className={`${isToday ? 'calendar-today' : ''} ${isSelected ? 'calendar-selected' : ''} ${wasCompleted ? 'calendar-completed' : ''}`} aria-label={`${date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}${isToday ? ', today' : ''}${wasCompleted ? ', focus session completed' : ''}`} aria-current={isToday ? 'date' : undefined} aria-pressed={isSelected} onClick={() => setSelectedCalendarDate(key)}>{date.getDate()}</button>
+            })}
+          </div>
+          <div className="calendar-legend"><span><i /> Focus complete</span><span>{selectedCalendarDate === todayKey ? 'Today' : completedDateSet.has(selectedCalendarDate) ? 'Session complete' : 'No session logged'}</span></div>
         </div>
       </aside>
 
       <section className="workspace" id="focus">
         <header className="topbar">
           <div className="breadcrumb">Your space <span>/</span> <strong>Focus garden</strong></div>
-          <div className="topbar-right"><span className="today-date">TUESDAY, NOV 11</span><button className="icon-button" type="button" aria-label="Notifications">♧<i /></button></div>
+          <div className="topbar-right"><time className="today-date" dateTime={todayKey}>{today.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }).toUpperCase()}</time></div>
         </header>
 
         <div className="content">
@@ -161,11 +228,10 @@ export default function App() {
               <h1>Make room to <em>grow.</em></h1>
               <p className="welcome-copy">Settle in, focus on one thing, and watch your little world take shape.</p>
             </div>
-            <div className="sessions-pill"><span className="sessions-spark">✳</span><span><strong>{sessions} sessions</strong><small>grown this week</small></span></div>
           </section>
 
           <section className="garden-panel" aria-label="Your growing focus scene">
-            <div className="garden-heading"><div><span className="garden-kicker">YOUR FOCUS GARDEN</span><h2>{isRunning ? 'A little more, a little further.' : remaining === 0 ? 'Look what you grew.' : 'A fresh start, just for you.'}</h2></div><div className="weather"><span className="weather-sun">☼</span> A good day to grow</div></div>
+            <div className="garden-heading"><div><span className="garden-kicker">YOUR FOCUS GARDEN</span><h2>{isRunning ? 'A little more, a little further.' : remaining === 0 ? 'Look what you grew.' : 'A fresh start, just for you.'}</h2></div></div>
             <div className="scene-wrap"><Scene habitat={selectedHabitat} growth={growth} /><div className="scene-caption"><span className="caption-dot" /> {selected?.name} <span className="caption-divider">/</span> {Math.round(progress * 100)}% grown</div></div>
             <div className="garden-footer"><span>{remaining === 0 ? 'Session complete. Take a moment to enjoy it.' : isRunning ? 'Your garden is growing while you focus.' : 'Choose what you’d like to grow today.'}</span><span className="growth-meter"><i style={{ width: `${progress * 100}%` }} /></span></div>
           </section>
