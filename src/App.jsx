@@ -145,7 +145,6 @@ export default function App() {
           <div className="week-dots" aria-label="Four study days this week">
             <span className="done">M</span><span className="done">T</span><span className="done">W</span><span className="today">T</span><span>F</span><span>S</span><span>S</span>
           </div>
-          <div className="sidebar-footer"><span className="avatar">S</span><span>User's garden</span><span className="more">···</span></div>
         </div>
       </aside>
 
